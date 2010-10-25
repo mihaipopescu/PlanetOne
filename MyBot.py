@@ -15,9 +15,11 @@
 """
 
 from PlanetWars import PlanetWars, Fleet
-from sys import stderr
+#from sys import stderr
+from math import ceil
 
 GoldenRatio = 0.61803399
+GameTurnsRemaining = 200
 
 class Strategy:
     def __init__(self, pw, source_planet):
@@ -27,22 +29,27 @@ class Strategy:
         self._num_ships = 0
         self._score = 0
 
+    def PrintStrategyDebug(self, name, planet, metric):
+        #stderr.write(str(self._source_planet.PlanetID()) + name + str(planet.PlanetID()) + " =" +str(metric) + '\n')
+        #stderr.flush()
+        pass
+
     def SimulateForPlanet(self, planet, my_fleets, enemy_fleets):
+        global GameTurnsRemaining
+        
         ships = planet.NumShips()
         owner = planet.Owner()
-        while True:
-            stop = True
-            ships += planet.GrowthRate()
+        for _ in range(GameTurnsRemaining):
+            if owner != 0:
+                ships += planet.GrowthRate()
             
             for my_fleet in my_fleets:
                 if my_fleet.TurnsRemaining() > 0:
                         my_fleet._turns_remaining -= 1
-                        stop = False
                 else:
                     if owner != my_fleet.Owner():
                         ships -= my_fleet.NumShips()
                         if ships < 0:
-                            stderr.write('I take over! ')
                             ships = -ships
                             owner = my_fleet.Owner()
                     else:
@@ -51,20 +58,15 @@ class Strategy:
             for enemy_fleet in enemy_fleets:
                 if enemy_fleet.TurnsRemaining() > 0:
                     enemy_fleet._turns_remaining -= 1
-                    stop = False
                 else:
                     if owner != enemy_fleet.Owner():
                         ships -= enemy_fleet.NumShips()
                         if ships < 0:
-                            stderr.write('enemy takes over! ')
                             ships = -ships
                             owner = enemy_fleet.Owner()
                     else:
                         ships += enemy_fleet.NumShips()
 
-            if stop:
-                break
-            
         return [owner, ships]
 
     def GetMetricForPlanet(self, planet):
@@ -78,11 +80,10 @@ class Strategy:
             if enemy_fleet.DestinationPlanet() == planet.PlanetID():
                 enemy_fleets.append(enemy_fleet)
                 
-        stderr.write("Without intervention ")
-        [owner, _] = self.SimulateForPlanet(planet, my_fleets, enemy_fleets)
+        [owner, ships] = self.SimulateForPlanet(planet, my_fleets, enemy_fleets)
         
         me = self._source_planet.Owner()
-        if owner == me:
+        if owner == me and ships > planet.NumShips():
             return 0;
         
         dist = self._pw.Distance(self._source_planet.PlanetID(), planet.PlanetID())
@@ -92,28 +93,27 @@ class Strategy:
         
         my_fleets.append(Fleet(self._source_planet.Owner(), self._num_ships, self._source_planet.PlanetID(), planet.PlanetID(), dist, dist))
         
-        stderr.write("\nWith intervention ")
         [owner, ships] = self.SimulateForPlanet(planet, my_fleets, enemy_fleets)
-        stderr.write('\n')
         
         if owner == me:
             return ships
                             
-        return -1
+        return -ships
     
     def Colonize(self):
         for neutral_planet in self._pw.NeutralPlanets():
             # suicide attempt ? No Kamikaze fleets!
             if self._num_ships < neutral_planet.NumShips():
                 continue
-            
+    
             metric = self.GetMetricForPlanet(neutral_planet)
             
+            self.PrintStrategyDebug(" colonize ", neutral_planet, metric)
+                     
             if self._score < metric:
                 self._score = metric
                 self._dest_planet = neutral_planet
-                stderr.write("Colonize score: " + str(self._score)+'\n')
-          
+
             
     def Reinforce(self):
         # find an attacked planet that I can help
@@ -132,25 +132,25 @@ class Strategy:
                 continue
             
             metric = self.GetMetricForPlanet(my_planet)
+            self.PrintStrategyDebug(" reinforce ", my_planet, metric)
             
             # test with other strategy score
             if self._score < metric:
                 self._score = metric
                 self._dest_planet = my_planet
-                stderr.write("Reinforce score: " + str(self._score)+'\n')
-    
+                
     
     def Attack(self):
         # attack an enemy planet
         for enemy_planet in self._pw.EnemyPlanets():
             
             metric = self.GetMetricForPlanet(enemy_planet)
+            self.PrintStrategyDebug(" attack ", enemy_planet, metric)
             
             if self._score < metric:
                 self._dest_planet = enemy_planet
                 self._score = metric
-                stderr.write("Attack score: " + str(self._score)+'\n')
-
+                
 
     def Steal(self):
         # steal a neutral planet that the enemy will capture
@@ -158,24 +158,22 @@ class Strategy:
             enemy_planet = self._pw.GetPlanet(enemy_fleet.SourcePlanet())
             metric = self.GetMetricForPlanet(enemy_planet)
                 
+            self.PrintStrategyDebug(" steal attacker ", enemy_planet, metric)
             if self._score < metric:
                 self._dest_planet = enemy_planet
                 self._score = metric
-                stderr.write("Steal attacker score: " + str(self._score)+'\n')
+                
             
             planet = self._pw.GetPlanet(enemy_fleet.DestinationPlanet())    
             if planet.Owner() != 0:
                 continue
             
             metric = self.GetMetricForPlanet(planet)
-            
+            self.PrintStrategyDebug(" steal attacked ", planet, metric)
             if self._score < metric:
                 self._dest_planet = planet
                 self._score = metric
-                stderr.write("Steal attacked score: " + str(self._score)+'\n')
-            
-            
-        # steal the planet that the enemy have gone from
+                
 
     def Flee(self):
         metric = self.GetMetricForPlanet(self._source_planet)
@@ -184,10 +182,10 @@ class Strategy:
         if metric < 0:
             # take all ships ... and apply the best strategy with them
             self._num_ships = self._source_planet.NumShips()
-            stderr.write("Flee !\n")
+            #stderr.write("Flee!\n")
         else:
             # else take only half
-            self._num_ships = self._source_planet.NumShips() / 2
+            self._num_ships = int(ceil(self._source_planet.NumShips() * GoldenRatio))
     
 
     def Compute(self):
@@ -200,16 +198,19 @@ class Strategy:
     def Execute(self):
         if(self._dest_planet != None and self._num_ships > 0):
             self._pw.IssueOrder(self._source_planet.PlanetID(), self._dest_planet.PlanetID(), self._num_ships)
-            stderr.flush()
+            #stderr.flush()
         
         
 def DoTurn(pw):
+    global GameTurnsRemaining
     
     for p in pw.MyPlanets():
         strategy = Strategy(pw, p)
         strategy.Compute()
         if strategy._score > 0:
             strategy.Execute()
+            
+    GameTurnsRemaining -= 1
 
 
 def main():
