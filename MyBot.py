@@ -21,6 +21,7 @@ from math import ceil
 GoldenRatio = 0.61803399
 GameTurnsRemaining = 200
 
+
 class Strategy:
     def __init__(self, pw, source_planet):
         self._pw = pw
@@ -34,7 +35,7 @@ class Strategy:
         #stderr.flush()
         pass
 
-    def SimulateForPlanet(self, planet, my_fleets, enemy_fleets):
+    def SimulateForPlanet(self, planet, fleets):
         global GameTurnsRemaining
         
         ships = planet.NumShips()
@@ -43,45 +44,27 @@ class Strategy:
             if owner != 0:
                 ships += planet.GrowthRate()
             
-            for my_fleet in my_fleets:
-                if my_fleet.TurnsRemaining() > 0:
-                        my_fleet._turns_remaining -= 1
-                else:
-                    if owner != my_fleet.Owner():
-                        ships -= my_fleet.NumShips()
+            for fleet in fleets:
+                fleet._turns_remaining -= 1                
+                if fleet.TurnsRemaining() == 0:
+                    if owner != fleet.Owner():
+                        ships -= fleet.NumShips()
                         if ships < 0:
                             ships = -ships
-                            owner = my_fleet.Owner()
+                            owner = fleet.Owner()
                     else:
-                        ships += my_fleet.NumShips()
+                        ships += fleet.NumShips()
                     
-            for enemy_fleet in enemy_fleets:
-                if enemy_fleet.TurnsRemaining() > 0:
-                    enemy_fleet._turns_remaining -= 1
-                else:
-                    if owner != enemy_fleet.Owner():
-                        ships -= enemy_fleet.NumShips()
-                        if ships < 0:
-                            ships = -ships
-                            owner = enemy_fleet.Owner()
-                    else:
-                        ships += enemy_fleet.NumShips()
-
         return [owner, ships]
 
     def GetMetricForPlanet(self, planet):
-        my_fleets = []
-        for my_fleet in self._pw.MyFleets():
-            if my_fleet.DestinationPlanet() == planet.PlanetID():
-                my_fleets.append(my_fleet)
+        fleets = []
+        for fleet in self._pw.Fleets():
+            if fleet.DestinationPlanet() == planet.PlanetID():
+                fleets.append(fleet)
         
-        enemy_fleets = []
-        for enemy_fleet in self._pw.EnemyFleets():
-            if enemy_fleet.DestinationPlanet() == planet.PlanetID():
-                enemy_fleets.append(enemy_fleet)
-                
-        [owner, ships] = self.SimulateForPlanet(planet, my_fleets, enemy_fleets)
-        
+        [owner, ships] = self.SimulateForPlanet(planet, fleets)
+       
         me = self._source_planet.Owner()
         if owner == me and ships > planet.NumShips():
             return 0;
@@ -91,10 +74,10 @@ class Strategy:
         if dist == 0:
             return -1
         
-        my_fleets.append(Fleet(self._source_planet.Owner(), self._num_ships, self._source_planet.PlanetID(), planet.PlanetID(), dist, dist))
+        fleets.append(Fleet(self._source_planet.Owner(), self._num_ships, self._source_planet.PlanetID(), planet.PlanetID(), dist, dist))
         
-        [owner, ships] = self.SimulateForPlanet(planet, my_fleets, enemy_fleets)
-        
+        [owner, ships] = self.SimulateForPlanet(planet, fleets)
+               
         if owner == me:
             return ships
                             
@@ -102,9 +85,6 @@ class Strategy:
     
     def Colonize(self):
         for neutral_planet in self._pw.NeutralPlanets():
-            # suicide attempt ? No Kamikaze fleets!
-            if self._num_ships < neutral_planet.NumShips():
-                continue
     
             metric = self.GetMetricForPlanet(neutral_planet)
             
@@ -150,29 +130,7 @@ class Strategy:
             if self._score < metric:
                 self._dest_planet = enemy_planet
                 self._score = metric
-                
-
-    def Steal(self):
-        # steal a neutral planet that the enemy will capture
-        for enemy_fleet in self._pw.EnemyFleets():
-            enemy_planet = self._pw.GetPlanet(enemy_fleet.SourcePlanet())
-            metric = self.GetMetricForPlanet(enemy_planet)
-                
-            self.PrintStrategyDebug(" steal attacker ", enemy_planet, metric)
-            if self._score < metric:
-                self._dest_planet = enemy_planet
-                self._score = metric
-                
             
-            planet = self._pw.GetPlanet(enemy_fleet.DestinationPlanet())    
-            if planet.Owner() != 0:
-                continue
-            
-            metric = self.GetMetricForPlanet(planet)
-            self.PrintStrategyDebug(" steal attacked ", planet, metric)
-            if self._score < metric:
-                self._dest_planet = planet
-                self._score = metric
                 
 
     def Flee(self):
@@ -193,12 +151,10 @@ class Strategy:
         self.Colonize()
         self.Reinforce()
         self.Attack()
-        self.Steal()
-        
+
     def Execute(self):
         if(self._dest_planet != None and self._num_ships > 0):
             self._pw.IssueOrder(self._source_planet.PlanetID(), self._dest_planet.PlanetID(), self._num_ships)
-            #stderr.flush()
         
         
 def DoTurn(pw):
