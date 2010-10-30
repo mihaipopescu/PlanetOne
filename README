@@ -8,4 +8,7 @@ PlanetOne
 		If I will not be the owner of the planet, take action if possible
 		Simulate who will own the planet at the end of the game
 
- Always take all ships from source planet (bullybot version)
+2. For every planet that is not mine
+	Compute the best strategy to send a fleet from my best-closesest planet
+	Send as much ships as needed to capture the planet ( + Growth to have 1 turn in advance)
+	If I cannot send as much ships as needed, send some to sacrifice to weaken the planet
