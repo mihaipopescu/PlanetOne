@@ -21,37 +21,37 @@ from sys import stderr
 GoldenRatio = 0.61803399
 GameTurnsRemaining = 200
 
-
+ShipsRemaining = []
 
 class Strategy:
-    def __init__(self, pw, source_planet):
+    def __init__(self, pw, dest_planet):
         self._pw = pw
-        self._source_planet = source_planet
-        self._dest_planet = None
+        self._source_planet = None
+        self._dest_planet = dest_planet
         self._num_ships = 0
         self._score = 0
 
-    def PrintStrategyDebug(self, planet, metric):
+    def PrintStrategyDebug(self, planet, ships):
         return
-        stderr.write(str(self._source_planet.PlanetID()))
-        if planet.Owner() == 0:
-            stderr.write(" colonize ")
-        elif planet.Owner() == self._source_planet.Owner():
-            stderr.write(" reinforce ")
+        if self._dest_planet.Owner() == 0:
+            stderr.write("Colonize ")
+        elif self._dest_planet.Owner() == 1:
+            stderr.write("Reinforce ")
         else:
-            stderr.write(" attack ")
-        stderr.write(str(planet.PlanetID()) + " =" +str(metric) + '\n')
-        stderr.flush()
-        pass
+            stderr.write("Attack ")
 
-    def SimulateForPlanet(self, planet, fleets):
+        stderr.write(str(planet.PlanetID()) + " -> " + str(self._dest_planet.PlanetID()) + " N=" +str(ships) + '\n')
+        stderr.flush()
+
+    # simulate who will own the destination planet at the end of the game
+    def Simulate(self, fleets):
         global GameTurnsRemaining
         
-        ships = planet.NumShips()
-        owner = planet.Owner()
+        ships = self._dest_planet.NumShips()
+        owner = self._dest_planet.Owner()
         for _ in range(GameTurnsRemaining):
             if owner != 0:
-                ships += planet.GrowthRate()
+                ships += self._dest_planet.GrowthRate()
             
             for fleet in fleets:
                 fleet._turns_remaining -= 1                
@@ -66,51 +66,74 @@ class Strategy:
                     
         return [owner, ships]
 
-    def GetMetricForPlanet(self, planet):
-        fleets = []
-        for fleet in self._pw.Fleets():
-            if fleet.DestinationPlanet() == planet.PlanetID():
-                fleets.append(fleet)
-        
-        [owner, _] = self.SimulateForPlanet(planet, fleets)
-       
-        dist = self._pw.Distance(self._source_planet.PlanetID(), planet.PlanetID())
-       
-        me = self._source_planet.Owner()
-        if owner == me or dist == 0:
-            return 0;
-        
-        fleets.append(Fleet(self._source_planet.Owner(), self._num_ships, self._source_planet.PlanetID(), planet.PlanetID(), dist, dist))
-        
-        [owner, ships] = self.SimulateForPlanet(planet, fleets)
-        
-        if owner == me:
-            return ships/dist
-                            
-        return -ships/dist
-    
     def Compute(self):
         
-        self._num_ships = self._source_planet.NumShips()
-
-        for planet in self._pw.Planets():
+        fleets = []
+        for fleet in self._pw.Fleets():
+            if fleet.DestinationPlanet() == self._dest_planet.PlanetID():
+                fleets.append(fleet)
+        
+        # without intervention
+        [owner, _] = self.Simulate(fleets)
             
-            metric = self.GetMetricForPlanet(planet)
-            self.PrintStrategyDebug(planet, metric)
+        # if I will be the owner no intervention is needed
+        if owner == 1:
+            return
+      
+        best_dist = 9999999
+        best_worst_dist = 9999999
+        
+        global ShipsRemaining
+        
+        # intervention required from one of my planets
+        for my_planet in self._pw.MyPlanets():
             
-            if self._score < metric:
-                self._dest_planet = planet
+            ships_needed = self._dest_planet.NumShips() + self._dest_planet.GrowthRate()
+            my_ships = ShipsRemaining[my_planet.PlanetID()]
+            
+            if my_ships < ships_needed:
+                continue 
+            
+            dist = self._pw.Distance(my_planet.PlanetID(), self._dest_planet.PlanetID())
+            
+            fleets.append( Fleet(1, ships_needed, my_planet.PlanetID(), self._dest_planet.PlanetID(), dist, dist) )
+            
+            [owner, ships] = self.Simulate(fleets)
+            
+            # I will not succeede even if I'll sent a fleet
+            if owner != 1:
+                if self._score <= 1 and dist < best_worst_dist:
+                    self._num_ships = max(my_planet.GrowthRate(), min(my_ships/2, dist * my_planet.GrowthRate()))
+                    self._source_planet = my_planet
+                    self._score = 1 # a non-zero score
+                    best_worst_dist = dist
+                continue
+            
+            metric = ships
+       
+            self.PrintStrategyDebug(my_planet, metric)
+            
+            if self._score < metric and dist < best_dist:
+                self._source_planet = my_planet
                 self._score = metric
-
+                self._num_ships = ships_needed
+                best_dist = dist
+                
     def Execute(self):
-        if(self._dest_planet != None and self._num_ships > 0):
+        if(self._source_planet != None and self._num_ships > 0):
             self._pw.IssueOrder(self._source_planet.PlanetID(), self._dest_planet.PlanetID(), self._num_ships)
+            ShipsRemaining[self._source_planet.PlanetID()] -= self._num_ships
         
         
 def DoTurn(pw):
     global GameTurnsRemaining
+    global ShipsRemaining
         
-    for p in pw.MyPlanets():
+    ShipsRemaining = []
+    for p in pw.Planets():
+        ShipsRemaining.append(p.NumShips())
+        
+    for p in pw.NotMyPlanets():
         strategy = Strategy(pw, p)
         strategy.Compute()
         if strategy._score > 0:

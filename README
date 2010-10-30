@@ -1,0 +1,11 @@
+PlanetOne
+---------
+
+
+1. For every planet that I own
+	For every planet that is not mine yet
+		simulate who will own the planet at the end of the game
+		If I will not be the owner of the planet, take action if possible
+		Simulate who will own the planet at the end of the game
+
+ Always take all ships from source planet (bullybot version)
